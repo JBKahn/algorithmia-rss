@@ -1,0 +1,234 @@
+
+
+<html>
+
+<head>
+<title>RSS Dashboard - Algorithmia</title>
+<link href="http://fonts.googleapis.com/css?family=Open+Sans:300italic,400italic,300,400,600,700" rel="stylesheet" type="text/css">
+<link rel="shortcut icon" href="favicon.png" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link href="http://maxcdn.bootstrapcdn.com/bootstrap/3.2.0/css/bootstrap.min.css" rel="stylesheet">
+<link rel="stylesheet" href="http://netdna.bootstrapcdn.com/font-awesome/4.1.0/css/font-awesome.min.css">
+<link rel="stylesheet" media="screen" href="algo.min.css">
+<style>
+  table td {
+    padding-bottom: 10px;
+    vertical-align: top;
+  }
+  span.label {
+    font-size: 10px;
+  }
+</style>
+<script>
+function run() {
+    var e = document.getElementById("urlDD");
+    var usrSel = e.options[e.selectedIndex].value;
+
+    document.getElementById("inputStrings").value = usrSel;
+}
+</script>
+</head>
+
+<body>
+  <div class="well">
+    <header>RSS Dashboard</header>
+    <p>
+      This tool takes in a URL to an RSS feed, and offers automatically generated tag suggestions, text summary and sentiment analysis.
+    </p>
+
+    <!-- Inputs -->
+    <div class="form-group" style="margin-bottom: 6px;">
+      <label class="block">Select one of our example URLs, or choose your own</label>
+      <select id="urlDD" class="form-control" onchange="updateUrl()" style="max-width: 350px; width: 95%;">
+        <option disabled>Select an example RSS feed</option>
+        <option value="https://news.ycombinator.com/rss">HackerNews</option>
+        <option value="http://techcrunch.com/feed/">TechCrunch</option>
+        <option value="http://www.anandtech.com/rss/">AnandTech</option>
+        <option value="http://rss.slashdot.org/Slashdot/slashdot">Slashdot</option>
+        <option value="http://arstechnica.com/feed/">Arstechnica</option>
+        <option value="http://feeds.feedburner.com/fastcompany/headlines">Fast Company</option>
+        <option value="http://feeds.feedburner.com/HighScalability">High Scalability</option>
+        <option value="http://avc.com/feed/">AVC</option>
+        <option value="http://continuations.com/rss">Continuations</option>
+        <option value="http://blog.algorithmia.com/rss">Algorithmia Blog</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <input class="form-control" style="max-width: 350px; width: 95%;" id="inputStrings">
+    </div>
+    <div class="form-group">
+      <button class="btn btn-primary" onclick="analyze()">Analyze RSS</button>
+      <span class="aspinner hidden" id="algo-spinner" style="position: relative; top: 8px; left: 5px;"></span>
+      <span id="demo-status"></span>
+    </div>
+
+    <table border="0" cellpadding="0" cellspacing="0" width="95%">
+      <tbody id="output">
+      </tbody>
+    </table>
+
+  </div>
+
+<script src="algorithmia.js" type="text/javascript"></script>
+<script>
+  var api_key = "953ee0c315874b219bd6d7ff1d4c8482";
+
+  updateUrl();
+  analyze();
+
+  function updateUrl() {
+    var e = document.getElementById("urlDD");
+    var usrSel = e.options[e.selectedIndex].value;
+
+    document.getElementById("inputStrings").value = usrSel;
+  }
+
+  function analyze() {
+    var topicLabels = []
+    document.getElementById("demo-status").innerText = "";
+    startTask();
+
+    // Build instance
+    var inputUrl = document.getElementById("inputStrings").value;
+
+    // Clear table
+    var output = document.getElementById("output");
+    output.innerHTML = "";
+    document.getElementById("demo-status").innerHTML = "";
+
+    // Query RSS scraper
+    Algorithmia.query("/tags/ScrapeRSS", api_key, inputUrl, function(error, items) {
+      finishTask();
+      // Print debug output
+      if(error) {
+        document.getElementById("demo-status").innerHTML = '<span class="text-danger">Failed to load RSS feed (' + error + ')</span>';
+        return;
+      }
+      // console.log("items", items);
+
+      // TRIM ITEMS
+      items.length = 6;
+
+      // Query autotagger for each url
+      for(var i in items) {
+        startTask();
+
+        // Create closure to capture item
+        (function() {
+          var index = i;
+          var item = items[i];
+          var itemUrl = item.url
+
+          // Add to table
+          var row = document.createElement("tr");
+          output.appendChild(row);
+          var itemHTML = '<td>' + (Number(index) + 1) + '. </td>';
+          itemHTML += '<td>';
+          itemHTML += '<div><a href="' + itemUrl + '">' + item.title + '</a></div>';
+          // itemHTML += '<td>' + item.description + '</td>';
+          itemHTML += '<div class="summary small"></div>';
+          itemHTML += '<div class="tags"></div>';
+          itemHTML += '</td>';
+          itemHTML += '<td class="sentiment" width="20"></td>';
+          row.innerHTML += itemHTML;
+
+          var summaryElement = row.getElementsByClassName("summary")[0];
+          var tagsElement = row.getElementsByClassName("tags")[0];
+          var sentimentElement = row.getElementsByClassName("sentiment")[0];
+
+          // Use a utility algorithm to fetch page text
+          Algorithmia.query("/util/Html2Text", api_key, itemUrl, function(error, itemText) {
+            finishTask();
+            if(error) {
+              document.getElementById("demo-status").innerHTML = '<span class="text-danger">Error fetching ' + itemUrl + '</span>';
+              return;
+            }
+
+            // Run NLP algos on the links
+            summarize(itemText, summaryElement);
+            autotag(itemText, tagsElement);
+            sentiment(itemText, sentimentElement);
+          });
+        })(); // End closure
+      }
+    });
+  }
+
+  function summarize(itemText, summaryElement) {
+    startTask();
+    // Query topic analysis
+    Algorithmia.query("/nlp/Summarizer", api_key, itemText, function(error, summaryText) {
+      finishTask();
+      // Print debug output
+      if(error) {
+        document.getElementById("demo-status").innerHTML = '<span class="text-danger">' + error + '</span>';
+        return;
+      }
+      summaryElement.innerText = summaryText;
+    });
+  }
+
+  function autotag(itemText, tagsElement) {
+    startTask();
+
+    var topics = [];
+    var topicLabels = [];
+
+    if(itemText) {
+      itemText = itemText.split("\n");
+    }
+
+    // Query topic analysis
+    Algorithmia.query("/nlp/AutoTag", api_key, itemText, function(error, topics) {
+      finishTask();
+      // Print debug output
+      if(error) {
+        document.getElementById("demo-status").innerHTML = '<span class="text-danger">' + error + '</span>';
+        return;
+      }
+      for (var key in topics) {
+         topicLabels.push('<span class="label label-info">' + topics[key] + '</span> ');
+      }
+      tagsElement.innerHTML = topicLabels.join('');
+    });
+  }
+
+  // var smileys = [";-(", ":-(", ":-|", ":-)", ":-D"];
+  var smileys = [
+    '<i class="fa fa-frown-o"></i>',
+    '<i class="fa fa-frown-o"></i>',
+    '<i class="fa fa-meh-o"></i>',
+    '<i class="fa fa-smile-o"></i>',
+    '<i class="fa fa-smile-o"></i>'
+  ];
+
+  function sentiment(itemText, sentimentElement) {
+    startTask();
+
+    // Query topic analysis
+    Algorithmia.query("/nlp/SentimentAnalysis", api_key, itemText, function(error, sentimentScore) {
+      finishTask();
+      // Print debug output
+      if(error) {
+        document.getElementById("demo-status").innerHTML = '<span class="text-danger">' + error + '</span>';
+        return;
+      }
+      sentimentElement.innerHTML = smileys[sentimentScore];
+    });
+  }
+
+  var numTasks = 0;
+  function startTask() {
+    numTasks++;
+    document.getElementById("algo-spinner").classList.remove("hidden");
+  }
+  function finishTask() {
+    numTasks--;
+    if(numTasks <= 0) {
+      document.getElementById("algo-spinner").classList.add("hidden");
+    }
+  }
+
+</script>
+</body>
+</html>
